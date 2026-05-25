@@ -58,9 +58,11 @@
   .shift-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:14px;display:flex;gap:12px;align-items:center;position:relative;overflow:hidden;cursor:pointer;margin-bottom:10px;transition:transform .1s}
   .shift-card:active{transform:scale(.98)}
   .shift-card.unscheduled{border-color:rgba(196,108,255,.35)}
-  .shift-card.unscheduled::before,.shift-card.has-ot::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+  .shift-card.has-holiday{border-color:rgba(255,153,0,.5)}
+  .shift-card.unscheduled::before,.shift-card.has-ot::before,.shift-card.has-holiday::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
   .shift-card.unscheduled::before{background:var(--purple)}
   .shift-card.has-ot::before{background:var(--orange)}
+  .shift-card.has-holiday::before{background:#ff9900}
   .date-badge{flex-shrink:0;width:46px;text-align:center}
   .date-badge .dow{font-size:9px;font-weight:700;color:var(--muted);letter-spacing:.1em}
   .date-badge .day{font-family:'Syne',sans-serif;font-size:24px;font-weight:800;line-height:1.1}
@@ -278,6 +280,13 @@
         </div>
         <div class="toggle-switch" id="unscheduledSwitch"></div>
       </div>
+      <div class="toggle-row" onclick="toggleHoliday()">
+        <div>
+          <div class="toggle-title" style="color:#ff9900">🎉 Holiday</div>
+          <div class="toggle-desc">Holiday shift — paid at 3.0× (triple time)</div>
+        </div>
+        <div class="toggle-switch" id="holidaySwitch"></div>
+      </div>
       <div class="form-group">
         <div class="form-label">Note (optional)</div>
         <input type="text" class="form-input" id="shiftNote" placeholder="e.g. Holiday call-in...">
@@ -360,7 +369,7 @@
 </div>
 
 <script>
-let state = { hourlyRate:0, shifts:[], period:'week', prevPeriod:'week', editingId:null, unscheduled:false, calMonth:new Date().getMonth(), calYear:new Date().getFullYear() };
+let state = { hourlyRate:0, shifts:[], period:'week', prevPeriod:'week', editingId:null, unscheduled:false, isHoliday:false, calMonth:new Date().getMonth(), calYear:new Date().getFullYear() };
 const CREW_ANCHOR = new Date(2026,4,14);
 
 function startOfDay(d){ return new Date(d.getFullYear(),d.getMonth(),d.getDate()); }
@@ -386,15 +395,16 @@ function calcPaidHours(startStr,endStr){
   return Math.max(0,gross/60-0.5);
 }
 
-function calcEarnings(paidHours,rate,isScheduled){
+function calcEarnings(paidHours,rate,isScheduled,isHoliday){
   if(!rate||rate<=0) return 0;
+  if(isHoliday) return paidHours*rate*3.0;
   if(!isScheduled) return paidHours*rate*1.75;
   if(paidHours<=8) return paidHours*rate;
   return (8*rate)+((paidHours-8)*rate*1.5);
 }
 
-function otHours(paidHours,isUnscheduled){
-  return isUnscheduled?0:Math.max(0,paidHours-8);
+function otHours(paidHours,isUnscheduled,isHoliday){
+  return (isUnscheduled||isHoliday)?0:Math.max(0,paidHours-8);
 }
 
 function getThisWeekMonday(){
@@ -471,9 +481,9 @@ function renderSummary(){
   const visible=filterShifts(state.shifts,state.period);
   let te=0,tp=0,tr=0,tot=0,uc=0;
   visible.forEach(s=>{
-    te+=calcEarnings(s.paidHours,state.hourlyRate,!s.isUnscheduled);
+    te+=calcEarnings(s.paidHours,state.hourlyRate,!s.isUnscheduled,s.isHoliday||false);
     tp+=s.paidHours;
-    const ot=otHours(s.paidHours,s.isUnscheduled);
+    const ot=otHours(s.paidHours,s.isUnscheduled,s.isHoliday||false);
     tot+=ot;
     tr+=s.isUnscheduled?s.paidHours:Math.min(s.paidHours,8);
     if(s.isUnscheduled) uc++;
@@ -700,12 +710,12 @@ function renderShifts(){
     return;
   }
   list.innerHTML=visible.map(s=>{
-    const earnings=calcEarnings(s.paidHours,state.hourlyRate,!s.isUnscheduled);
-    const ot=otHours(s.paidHours,s.isUnscheduled);
+    const earnings=calcEarnings(s.paidHours,state.hourlyRate,!s.isUnscheduled,s.isHoliday||false);
+    const ot=otHours(s.paidHours,s.isUnscheduled,s.isHoliday||false);
     const{dow,day,mon}=fmtDate(s.date);
-    const badge=s.isUnscheduled?`<span class="badge badge-unsc">1.75×</span>`:ot>0?`<span class="badge badge-ot">OT</span>`:'';
+    const badge=s.isHoliday?`<span class="badge" style="background:rgba(255,153,0,0.15);color:#ff9900;border:1px solid rgba(255,153,0,0.3)">3.0×</span>`:s.isUnscheduled?`<span class="badge badge-unsc">1.75×</span>`:ot>0?`<span class="badge badge-ot">OT</span>`:'';
     const otNote=(!s.isUnscheduled&&ot>0)?` (${ot.toFixed(1)}h OT)`:'';
-    const cls=s.isUnscheduled?'unscheduled':ot>0?'has-ot':'';
+    const cls=s.isHoliday?'has-holiday':s.isUnscheduled?'unscheduled':ot>0?'has-ot':'';
     return `<div class="shift-card ${cls}" onclick="openEditShift('${s.id}')">
       <div class="date-badge"><div class="dow">${dow}</div><div class="day">${day}</div><div class="mon">${mon}</div></div>
       <div class="shift-divider"></div>
@@ -749,6 +759,7 @@ function stripDayTapped(dateStr){
   document.getElementById('shiftNote').value='';
   document.getElementById('shiftDeleteBtn').style.display='none';
   document.getElementById('unscheduledSwitch').classList.toggle('on',!isA);
+  document.getElementById('holidaySwitch').classList.remove('on');
   updateCrewIndicator(); updateShiftPreview();
   document.getElementById('shiftModal').classList.add('open');
 }
@@ -759,7 +770,7 @@ function todayStr(){
 }
 
 function openAddShift(){
-  state.editingId=null; state.unscheduled=false;
+  state.editingId=null; state.unscheduled=false; state.isHoliday=false;
   document.getElementById('shiftModalTitle').textContent='Add Shift';
   document.getElementById('shiftDate').value=todayStr();
   document.getElementById('shiftStart').value='18:00';
@@ -767,6 +778,7 @@ function openAddShift(){
   document.getElementById('shiftNote').value='';
   document.getElementById('shiftDeleteBtn').style.display='none';
   document.getElementById('unscheduledSwitch').classList.remove('on');
+  document.getElementById('holidaySwitch').classList.remove('on');
   updateCrewIndicator(); updateShiftPreview();
   document.getElementById('shiftModal').classList.add('open');
 }
@@ -774,7 +786,7 @@ function openAddShift(){
 function openEditShift(id){
   const s=state.shifts.find(s=>s.id===id);
   if(!s) return;
-  state.editingId=id; state.unscheduled=s.isUnscheduled;
+  state.editingId=id; state.unscheduled=s.isUnscheduled; state.isHoliday=s.isHoliday||false;
   document.getElementById('shiftModalTitle').textContent='Edit Shift';
   document.getElementById('shiftDate').value=s.date;
   document.getElementById('shiftStart').value=s.startTime;
@@ -782,6 +794,7 @@ function openEditShift(id){
   document.getElementById('shiftNote').value=s.note||'';
   document.getElementById('shiftDeleteBtn').style.display='block';
   document.getElementById('unscheduledSwitch').classList.toggle('on',s.isUnscheduled);
+  document.getElementById('holidaySwitch').classList.toggle('on',s.isHoliday||false);
   updateCrewIndicator(); updateShiftPreview();
   document.getElementById('shiftModal').classList.add('open');
 }
@@ -790,7 +803,16 @@ function closeShiftModal(){ document.getElementById('shiftModal').classList.remo
 
 function toggleUnscheduled(){
   state.unscheduled=!state.unscheduled;
+  if(state.unscheduled){ state.isHoliday=false; document.getElementById('holidaySwitch').classList.remove('on'); }
   document.getElementById('unscheduledSwitch').classList.toggle('on',state.unscheduled);
+  updateShiftPreview();
+}
+
+function toggleHoliday(){
+  state.isHoliday=!state.isHoliday;
+  // Holiday and unscheduled are mutually exclusive
+  if(state.isHoliday) { state.unscheduled=false; document.getElementById('unscheduledSwitch').classList.remove('on'); }
+  document.getElementById('holidaySwitch').classList.toggle('on',state.isHoliday);
   updateShiftPreview();
 }
 
@@ -807,12 +829,13 @@ function updateShiftPreview(){
   const s=document.getElementById('shiftStart').value||'18:00';
   const e=document.getElementById('shiftEnd').value||'06:00';
   const paid=calcPaidHours(s,e);
-  const earnings=calcEarnings(paid,state.hourlyRate,!state.unscheduled);
+  const earnings=calcEarnings(paid,state.hourlyRate,!state.unscheduled,state.isHoliday);
   const ot=otHours(paid,state.unscheduled);
   document.getElementById('previewAmount').textContent=fmt(earnings);
   document.getElementById('previewHrs').textContent=paid.toFixed(1)+'h';
   let note='☕ 30 min break deducted';
-  if(state.unscheduled) note='⭐ Unscheduled — 1.75× rate';
+  if(state.isHoliday) note='🎉 Holiday — triple time 3.0×';
+  else if(state.unscheduled) note='⭐ Unscheduled — 1.75× rate';
   else if(ot>0) note=`⚡ ${ot.toFixed(1)}h overtime at 1.5×`;
   document.getElementById('previewNote').textContent=note;
 }
@@ -836,7 +859,7 @@ function saveShift(){
     id:state.editingId||crypto.randomUUID(),
     date,startTime:startStr,endTime:endStr,
     startDisplay:f12(startStr),endDisplay:f12(endStr),
-    paidHours:paid,isUnscheduled:state.unscheduled,note,
+    paidHours:paid,isUnscheduled:state.unscheduled,isHoliday:state.isHoliday,note,
   };
   if(state.editingId){
     const idx=state.shifts.findIndex(s=>s.id===state.editingId);
@@ -927,14 +950,107 @@ function closePaystub(){
   document.getElementById('paystubModal').classList.remove('open');
 }
 
+function openPremiumBreakdown(){
+  renderPremiumBreakdown();
+  document.getElementById('premiumModal').classList.add('open');
+}
+
+function closePremiumBreakdown(){
+  document.getElementById('premiumModal').classList.remove('open');
+}
+
+function renderPremiumBreakdown(){
+  const rate = state.hourlyRate;
+  const thisWeekShifts = filterShifts(state.shifts, 'week');
+
+  let rows = '';
+  let totalPremHrs = 0, totalPremAmt = 0;
+
+  thisWeekShifts.forEach(s => {
+    const d = new Date(s.date + 'T12:00:00');
+    const dateLabel = d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
+
+    if(s.isUnscheduled){
+      // Unscheduled: 0.75× extra per hour
+      const premHrs = s.paidHours * 0.75;
+      const premAmt = premHrs * rate;
+      totalPremHrs += premHrs;
+      totalPremAmt += premAmt;
+      rows += `
+        <div class="ps-grid-row" style="grid-template-columns:1fr 1fr 1fr 1fr;background:#f9f0ff;">
+          <div style="font-size:11px;font-weight:600;color:#111">${dateLabel}</div>
+          <div style="font-size:10px;color:#7b00cc;text-align:center;font-weight:700">1.75× Day</div>
+          <div style="font-size:11px;font-family:'DM Mono',monospace;text-align:right;color:#7b00cc">${premHrs.toFixed(2)} hrs</div>
+          <div style="font-size:11px;font-family:'DM Mono',monospace;text-align:right;color:#7b00cc">$${premAmt.toFixed(2)}</div>
+        </div>`;
+    } else {
+      const ot = Math.max(0, s.paidHours - 8);
+      if(ot > 0){
+        // OT: 0.5× extra per OT hour
+        const premHrs = ot * 0.5;
+        const premAmt = premHrs * rate;
+        totalPremHrs += premHrs;
+        totalPremAmt += premAmt;
+        rows += `
+          <div class="ps-grid-row" style="grid-template-columns:1fr 1fr 1fr 1fr;background:#fff8ee;">
+            <div style="font-size:11px;font-weight:600;color:#111">${dateLabel}</div>
+            <div style="font-size:10px;color:#cc6600;text-align:center;font-weight:700">1.5× OT</div>
+            <div style="font-size:11px;font-family:'DM Mono',monospace;text-align:right;color:#cc6600">${premHrs.toFixed(2)} hrs</div>
+            <div style="font-size:11px;font-family:'DM Mono',monospace;text-align:right;color:#cc6600">$${premAmt.toFixed(2)}</div>
+          </div>`;
+      }
+    }
+  });
+
+  if(!rows){
+    rows = '<div style="padding:24px;text-align:center;color:#888;font-size:14px;">No premium pay this week.</div>';
+  }
+
+  const html = `
+    <div class="ps-wrap">
+      <div class="ps-section-title">Premium Pay — How It Works</div>
+      <div style="padding:10px 12px;background:#f7f5f0;border-bottom:1px solid #ccc;font-size:11px;color:#444;line-height:1.6">
+        Crown pays all hours at your base rate first (REGULAR line).<br>
+        PREMIUM is the <strong>extra portion</strong> added on top:<br>
+        • OT hours (>8/shift): <strong>+ 0.5× rate per hour</strong><br>
+        • Unscheduled days: <strong>+ 0.75× rate per hour</strong>
+      </div>
+
+      <div class="ps-section-title">This Week's Premium Shifts</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;padding:6px 12px;background:#ebe9e4;border-bottom:1px solid #ccc;">
+        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase">Date</div>
+        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;text-align:center">Type</div>
+        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;text-align:right">Prem Hrs</div>
+        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;text-align:right">Amount</div>
+      </div>
+      ${rows}
+      <div class="ps-grid-row ps-ded-row total" style="grid-template-columns:1fr 1fr 1fr 1fr">
+        <div style="grid-column:1/3;font-weight:800">Total Premium</div>
+        <div style="font-family:'DM Mono',monospace;text-align:right;font-weight:800">${totalPremHrs.toFixed(2)} hrs</div>
+        <div style="font-family:'DM Mono',monospace;text-align:right;font-weight:800">$${totalPremAmt.toFixed(2)}</div>
+      </div>
+
+      <div style="padding:10px 12px;background:#ebe9e4;border-top:1px solid #ccc;">
+        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;margin-bottom:6px">Rate Used</div>
+        <div style="font-size:13px;font-weight:800;color:#111;font-family:'DM Mono',monospace">$${rate.toFixed(4)} / hr</div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('premiumBody').innerHTML = html;
+}
+
 function renderPaystub(){
   const rate = state.hourlyRate;
   const thisWeekShifts = filterShifts(state.shifts, 'week');
 
   // Calculate hours and pay breakdown matching Crown's paystub format
   let regHrs = 0, otHrs = 0, unscHrs = 0;
+  let holHrs = 0;
   thisWeekShifts.forEach(s => {
-    if(s.isUnscheduled){
+    if(s.isHoliday){
+      holHrs += s.paidHours;
+    } else if(s.isUnscheduled){
       unscHrs += s.paidHours;
     } else {
       regHrs += Math.min(s.paidHours, 8);
@@ -943,19 +1059,22 @@ function renderPaystub(){
   });
 
   // REGULAR = all worked hours × base rate
-  const totalWorkedHrs = regHrs + otHrs + unscHrs;
-  const regAmt = totalWorkedHrs * rate;
+  const totalWorkedHrs = regHrs + otHrs + unscHrs + holHrs;
+  const regAmt = (regHrs + otHrs + unscHrs) * rate; // holiday shown separately
 
-  // PREMIUM = (OT × 0.5 × rate) + (Unscheduled × 0.75 × rate)
-  // This is the EXTRA on top of regular for OT and unsch days
-  const premiumHrsEquiv = (otHrs * 0.5) + (unscHrs * 0.75);
+  // PREMIUM = (OT × 0.5 × rate) + (Unscheduled × 0.75 × rate) + (Holiday × 2.0 × rate)
+  const premiumHrsEquiv = (otHrs * 0.5) + (unscHrs * 0.75) + (holHrs * 2.0);
   const premiumAmt = premiumHrsEquiv * rate;
 
-  // SHIFT differential: 5% reg, 7.5% OT, 8.75% unscheduled (matches multipliers)
-  const shiftAmt = (regHrs * rate * 0.05) + (otHrs * rate * 0.075) + (unscHrs * rate * 0.0875);
+  // HOLIDAY = triple time (3.0×)
+  const holidayAmt = holHrs * rate * 3.0;
+
+  // SHIFT differential: 5% reg, 7.5% OT, 8.75% unsch, 15% holiday (3× the 5%)
+  const shiftAmt = (regHrs * rate * 0.05) + (otHrs * rate * 0.075) + (unscHrs * rate * 0.0875) + (holHrs * rate * 0.15);
 
   // Gross
-  const gross = regAmt + premiumAmt + shiftAmt;
+  const gross = regAmt + premiumAmt + (holHrs > 0 ? 0 : 0) + shiftAmt;
+  // Note: holiday already included via regAmt + premiumHrsEquiv (2.0x extra) = 3.0x total
 
   // Deductions (estimates based on Crown WA paystub)
   const fedTax     = gross * 0.13;       // ~13%
@@ -994,7 +1113,28 @@ function renderPaystub(){
       <div class="ps-grid-row ps-check-grid">
         <div><div class="ps-label">Period End</div><div class="ps-value">${periodEndStr}</div></div>
         <div><div class="ps-label">Total Hrs</div><div class="ps-value ps-numeric">${totalWorkedHrs.toFixed(2)}</div></div>
-        <div><div class="ps-label">Gross</div><div class="ps-value ps-numeric">${fmtN(gross)}</div></div>
+        <div><div class="ps-label">Gross Pay</div><div class="ps-value ps-numeric">${fmtN(gross)}</div></div>
+      </div>
+      <!-- Hours breakdown grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;padding:6px 12px;border-bottom:1px solid #ccc;background:#ebe9e4;">
+        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.05em">Reg Hrs</div>
+        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.05em;text-align:center">OT Hrs</div>
+        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.05em;text-align:center">1.75× Hrs</div>
+        <div style="font-size:9px;font-weight:700;color:#ff9900;text-transform:uppercase;letter-spacing:0.05em;text-align:right">Holiday</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;padding:6px 12px;border-bottom:2px solid #333;background:#f7f5f0;">
+        <div style="font-size:13px;font-weight:800;color:#111;font-family:'DM Mono',monospace">${regHrs.toFixed(2)}</div>
+        <div style="font-size:13px;font-weight:800;color:#cc6600;font-family:'DM Mono',monospace;text-align:center">${otHrs.toFixed(2)}</div>
+        <div style="font-size:13px;font-weight:800;color:#7b00cc;font-family:'DM Mono',monospace;text-align:center">${unscHrs.toFixed(2)}</div>
+        <div style="font-size:13px;font-weight:800;color:#ff9900;font-family:'DM Mono',monospace;text-align:right">${holHrs.toFixed(2)}</div>
+      </div>
+      <!-- Premium tap target -->
+      <div onclick="openPremiumBreakdown()" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#fff8e8;border-bottom:2px solid #333;cursor:pointer;border-top:none;">
+        <div>
+          <div style="font-size:9px;font-weight:700;color:#996600;text-transform:uppercase;letter-spacing:0.05em">Premium Pay</div>
+          <div style="font-size:13px;font-weight:800;color:#996600;font-family:'DM Mono',monospace">${fmtN(premiumAmt)} <span style="font-size:10px;font-weight:600">(${premiumHrsEquiv.toFixed(2)} hrs)</span></div>
+        </div>
+        <div style="font-size:18px;color:#996600">›</div>
       </div>
 
       <div class="ps-section-title">Earnings</div>
@@ -1008,6 +1148,11 @@ function renderPaystub(){
         <div class="ps-numeric">${totalWorkedHrs.toFixed(2)}</div>
         <div class="ps-numeric">${fmtN(regAmt)}</div>
       </div>
+      ${holHrs > 0 ? `<div class="ps-grid-row ps-earn-row" style="background:#fff8ee">
+        <div style="color:#ff9900;font-weight:800">HOLIDAY (3.0×)</div>
+        <div class="ps-numeric" style="color:#ff9900">${holHrs.toFixed(2)}</div>
+        <div class="ps-numeric" style="color:#ff9900">${fmtN(holHrs * rate * 3.0)}</div>
+      </div>` : ''}
       ${premiumHrsEquiv > 0 ? `<div class="ps-grid-row ps-earn-row">
         <div>PREMIUM</div>
         <div class="ps-numeric">${premiumHrsEquiv.toFixed(2)}</div>
@@ -1094,6 +1239,18 @@ load();
 if(state.hourlyRate>0){autoPopulateCrewShifts();save();}
 renderAll();
 </script>
+
+<!-- Premium Breakdown Modal -->
+<div class="modal-overlay" id="premiumModal">
+  <div class="modal" style="height:85dvh">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">⚡ Premium Pay Breakdown</div>
+      <button class="modal-close" onclick="closePremiumBreakdown()">✕</button>
+    </div>
+    <div class="modal-body" id="premiumBody"></div>
+  </div>
+</div>
 
 <!-- Paystub Modal -->
 <div class="modal-overlay" id="paystubModal">
