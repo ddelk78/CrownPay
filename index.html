@@ -522,13 +522,12 @@ function renderSummary(){
   document.getElementById('rateWarning').style.display=state.hourlyRate>0?'none':'flex';
 }
 
-function renderSchedule(){
+function renderSchedule(forceRefresh){
   if(state.period==='month'){
     renderCalendar();
   } else {
-    // Only re-render strip if not already showing, otherwise just scroll
     const existing=document.getElementById('scheduleStrip');
-    if(!existing){
+    if(!existing || forceRefresh || state.prevPeriod==='month'){
       renderStrip();
     } else {
       scrollStripToPeriod();
@@ -758,7 +757,7 @@ function renderShifts(){
   }).join('');
 }
 
-function renderAll(){ renderSummary(); renderSchedule(); renderShifts(); }
+function renderAll(forceRefresh){ renderSummary(); renderSchedule(forceRefresh); renderShifts(); }
 
 document.getElementById('periodTabs').addEventListener('click',e=>{
   const tab=e.target.closest('.period-tab');
@@ -894,9 +893,7 @@ function saveShift(){
     state.shifts.push(shift);
   }
   save();
-  state.prevPeriod = 'month'; // force strip to fully re-render with updated shifts
-  renderAll();
-  state.prevPeriod = state.period;
+  renderAll(true);
   closeShiftModal();
 }
 
@@ -905,9 +902,7 @@ function deleteShift(){
   if(!confirm('Delete this shift?')) return;
   state.shifts=state.shifts.filter(s=>s.id!==state.editingId);
   save();
-  state.prevPeriod = 'month'; // force strip to fully re-render with updated shifts
-  renderAll();
-  state.prevPeriod = state.period;
+  renderAll(true);
   closeShiftModal();
 }
 
@@ -1153,46 +1148,55 @@ function renderPaystub(){
 
   const html = `
     <div class="ps-wrap">
+
+      <!-- Header -->
       <div class="ps-banner">
-        <div class="ps-banner-title">👑 CROWN</div>
-        <div class="ps-banner-sub">Brand-Building Packaging™</div>
-      </div>
-      <div class="ps-company">CROWN Cork &amp; Seal USA, Inc. · Estimated Paystub</div>
-
-      <div class="ps-section-title">Statement of Earnings and Deductions</div>
-      <div class="ps-grid-row ps-info-grid">
-        <div><div class="ps-label">Name</div><div class="ps-value">CrownPay User</div></div>
-        <div><div class="ps-label">Rate of Pay</div><div class="ps-value ps-numeric">${rate.toFixed(4)}</div></div>
+        <div class="ps-banner-title">👑 CROWN Cork &amp; Seal</div>
+        <div class="ps-banner-sub">Estimated Paystub · ${periodEndStr}</div>
       </div>
 
-      <div class="ps-section-title">Check Information</div>
-      <div class="ps-grid-row ps-check-grid">
-        <div><div class="ps-label">Period End</div><div class="ps-value">${periodEndStr}</div></div>
-        <div><div class="ps-label">Total Hrs</div><div class="ps-value ps-numeric">${totalWorkedHrs.toFixed(2)}</div></div>
-        <div><div class="ps-label">Gross Pay</div><div class="ps-value ps-numeric">${fmtN(gross)}</div></div>
-      </div>
-      <!-- Hours breakdown grid -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;padding:6px 12px;border-bottom:1px solid #ccc;background:#ebe9e4;">
-        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.05em">Reg Hrs</div>
-        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.05em;text-align:center">OT Hrs</div>
-        <div style="font-size:9px;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.05em;text-align:center">1.75× Hrs</div>
-        <div style="font-size:9px;font-weight:700;color:#ff9900;text-transform:uppercase;letter-spacing:0.05em;text-align:right">Holiday</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;padding:6px 12px;border-bottom:2px solid #333;background:#f7f5f0;">
-        <div style="font-size:13px;font-weight:800;color:#111;font-family:'DM Mono',monospace">${regHrs.toFixed(2)}</div>
-        <div style="font-size:13px;font-weight:800;color:#cc6600;font-family:'DM Mono',monospace;text-align:center">${otHrs.toFixed(2)}</div>
-        <div style="font-size:13px;font-weight:800;color:#7b00cc;font-family:'DM Mono',monospace;text-align:center">${unscHrs.toFixed(2)}</div>
-        <div style="font-size:13px;font-weight:800;color:#ff9900;font-family:'DM Mono',monospace;text-align:right">${holHrs.toFixed(2)}</div>
-      </div>
-      <!-- Premium tap target -->
-      <div onclick="openPremiumBreakdown()" style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#fff8e8;border-bottom:2px solid #333;cursor:pointer;border-top:none;">
-        <div>
-          <div style="font-size:9px;font-weight:700;color:#996600;text-transform:uppercase;letter-spacing:0.05em">Premium Pay</div>
-          <div style="font-size:13px;font-weight:800;color:#996600;font-family:'DM Mono',monospace">${fmtN(premiumAmt)} <span style="font-size:10px;font-weight:600">(${premiumHrsEquiv.toFixed(2)} hrs)</span></div>
+      <!-- Key info row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;background:#f7f5f0;border-bottom:2px solid #333;">
+        <div style="padding:10px 12px;border-right:1px solid #ccc">
+          <div class="ps-label">Rate of Pay</div>
+          <div class="ps-value" style="font-size:15px">$${rate.toFixed(4)}</div>
         </div>
-        <div style="font-size:18px;color:#996600">›</div>
+        <div style="padding:10px 12px;border-right:1px solid #ccc;text-align:center">
+          <div class="ps-label">Total Hrs</div>
+          <div class="ps-value" style="font-size:15px">${(totalWorkedHrs + holFixedHrs).toFixed(2)}</div>
+        </div>
+        <div style="padding:10px 12px;text-align:right">
+          <div class="ps-label">Gross Pay</div>
+          <div class="ps-value" style="font-size:15px;color:#1a4a1a">${fmtN(gross)}</div>
+        </div>
       </div>
 
+      <!-- Shift hours breakdown -->
+      <div class="ps-section-title">Shift Hours This Week</div>
+      <div style="display:grid;grid-template-columns:repeat(${holHrs > 0 ? 4 : (unscHrs > 0 ? 3 : 2)},1fr);background:#f7f5f0;border-bottom:2px solid #333;">
+        <div style="padding:8px 12px;border-right:1px solid #ccc">
+          <div class="ps-label">Scheduled</div>
+          <div style="font-size:16px;font-weight:800;color:#111;font-family:'DM Mono',monospace">${(regHrs+otHrs).toFixed(1)}h</div>
+          <div style="font-size:9px;color:#888">${regHrs.toFixed(1)} reg + ${otHrs.toFixed(1)} OT</div>
+        </div>
+        ${unscHrs > 0 ? `<div style="padding:8px 12px;border-right:1px solid #ccc">
+          <div class="ps-label" style="color:#7b00cc">Unscheduled</div>
+          <div style="font-size:16px;font-weight:800;color:#7b00cc;font-family:'DM Mono',monospace">${unscHrs.toFixed(1)}h</div>
+          <div style="font-size:9px;color:#888">1.75× rate</div>
+        </div>` : ''}
+        ${holHrs > 0 ? `<div style="padding:8px 12px;border-right:1px solid #ccc">
+          <div class="ps-label" style="color:#ff9900">Holiday</div>
+          <div style="font-size:16px;font-weight:800;color:#ff9900;font-family:'DM Mono',monospace">${holHrs.toFixed(1)}h</div>
+          <div style="font-size:9px;color:#888">worked + 13.25 fixed</div>
+        </div>` : ''}
+        <div style="padding:8px 12px;text-align:right">
+          <div class="ps-label">Paid Hours</div>
+          <div style="font-size:16px;font-weight:800;color:#1a4a1a;font-family:'DM Mono',monospace">${totalWorkedHrs.toFixed(1)}h</div>
+          <div style="font-size:9px;color:#888">excl. break</div>
+        </div>
+      </div>
+
+      <!-- Earnings table -->
       <div class="ps-section-title">Earnings</div>
       <div class="ps-grid-header ps-earn-header">
         <div>Description</div>
@@ -1204,18 +1208,22 @@ function renderPaystub(){
         <div class="ps-numeric">${totalWorkedHrs.toFixed(2)}</div>
         <div class="ps-numeric">${fmtN(regAmt)}</div>
       </div>
-      ${holFixedHrs > 0 ? `<div class="ps-grid-row ps-earn-row" style="background:#fff8ee">
-        <div style="color:#ff9900;font-weight:800">HOLIDAY</div>
-        <div class="ps-numeric" style="color:#ff9900">${holFixedHrs.toFixed(2)}</div>
-        <div class="ps-numeric" style="color:#ff9900">${fmtN(holAmt)}</div>
+      ${holFixedHrs > 0 ? `<div class="ps-grid-row ps-earn-row" style="background:#fffaf0">
+        <div style="color:#cc7700;font-weight:800">HOLIDAY</div>
+        <div class="ps-numeric" style="color:#cc7700">${holFixedHrs.toFixed(2)}</div>
+        <div class="ps-numeric" style="color:#cc7700">${fmtN(holAmt)}</div>
       </div>` : ''}
-      ${premiumHrsEquiv > 0 ? `<div class="ps-grid-row ps-earn-row">
-        <div>PREMIUM</div>
+      ${premiumHrsEquiv > 0 ? `
+      <div class="ps-grid-row ps-earn-row" onclick="openPremiumBreakdown()" style="cursor:pointer;background:#fffdf5">
+        <div style="display:flex;align-items:center;gap:4px">
+          PREMIUM
+          <span style="font-size:9px;background:#e6a800;color:#fff;padding:1px 5px;border-radius:4px;font-weight:700">Details ›</span>
+        </div>
         <div class="ps-numeric">${premiumHrsEquiv.toFixed(2)}</div>
         <div class="ps-numeric">${fmtN(premiumAmt)}</div>
       </div>` : ''}
       <div class="ps-grid-row ps-earn-row">
-        <div>SHIFT</div>
+        <div>SHIFT DIFF</div>
         <div class="ps-numeric">—</div>
         <div class="ps-numeric">${fmtN(shiftAmt)}</div>
       </div>
@@ -1225,52 +1233,29 @@ function renderPaystub(){
         <div class="ps-numeric">${fmtN(gross)}</div>
       </div>
 
+      <!-- Deductions table -->
       <div class="ps-section-title">Deductions (Estimates)</div>
       <div class="ps-grid-header ps-ded-header">
         <div>Description</div>
         <div class="ps-numeric">Amount</div>
       </div>
-      <div class="ps-grid-row ps-ded-row">
-        <div>FED INCOME TAX</div>
-        <div class="ps-numeric">${fmtN(fedTax)}</div>
-      </div>
-      <div class="ps-grid-row ps-ded-row">
-        <div>SOC SEC</div>
-        <div class="ps-numeric">${fmtN(socSec)}</div>
-      </div>
-      <div class="ps-grid-row ps-ded-row">
-        <div>MEDICARE</div>
-        <div class="ps-numeric">${fmtN(medicare)}</div>
-      </div>
-      <div class="ps-grid-row ps-ded-row">
-        <div>WORKERS COMP</div>
-        <div class="ps-numeric">${fmtN(workersComp)}</div>
-      </div>
-      <div class="ps-grid-row ps-ded-row">
-        <div>401K BEFORE TAX</div>
-        <div class="ps-numeric">${fmtN(k401Before)}</div>
-      </div>
-      <div class="ps-grid-row ps-ded-row">
-        <div>WA FAMILY LEAVE</div>
-        <div class="ps-numeric">${fmtN(waFamLeave)}</div>
-      </div>
-      <div class="ps-grid-row ps-ded-row">
-        <div>WA LTC</div>
-        <div class="ps-numeric">${fmtN(waLTC)}</div>
-      </div>
-      <div class="ps-grid-row ps-ded-row total">
-        <div>Total Deductions</div>
-        <div class="ps-numeric">${fmtN(totalDed)}</div>
-      </div>
+      <div class="ps-grid-row ps-ded-row"><div>FED INCOME TAX</div><div class="ps-numeric">${fmtN(fedTax)}</div></div>
+      <div class="ps-grid-row ps-ded-row"><div>SOC SEC</div><div class="ps-numeric">${fmtN(socSec)}</div></div>
+      <div class="ps-grid-row ps-ded-row"><div>MEDICARE</div><div class="ps-numeric">${fmtN(medicare)}</div></div>
+      <div class="ps-grid-row ps-ded-row"><div>WORKERS COMP</div><div class="ps-numeric">${fmtN(workersComp)}</div></div>
+      <div class="ps-grid-row ps-ded-row"><div>401K BEFORE TAX</div><div class="ps-numeric">${fmtN(k401Before)}</div></div>
+      <div class="ps-grid-row ps-ded-row"><div>WA FAMILY LEAVE</div><div class="ps-numeric">${fmtN(waFamLeave)}</div></div>
+      <div class="ps-grid-row ps-ded-row"><div>WA LTC</div><div class="ps-numeric">${fmtN(waLTC)}</div></div>
+      <div class="ps-grid-row ps-ded-row total"><div>Total Deductions</div><div class="ps-numeric">${fmtN(totalDed)}</div></div>
 
+      <!-- Net Pay -->
       <div class="ps-net-pay">
         <div class="ps-net-pay-label">ESTIMATED NET PAY</div>
         <div class="ps-net-pay-amount">${fmtN(netPay)}</div>
       </div>
 
       <div class="ps-note">
-        Estimated paystub based on This Week shifts · Washington state Crown rates<br>
-        Shift diff: 5% reg / 7.5% OT / 8.75% unsch / 10% holiday · Deductions: Fed 13%, SS 6.2%, Medicare 1.45%, WC 0.17%, 401k 2%, WA PFL 0.81%, WA LTC 0.58%
+        Estimate only · WA Crown rates · Excludes union dues, 401k loans, LTD
       </div>
     </div>
   `;
