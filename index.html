@@ -368,6 +368,32 @@
   </div>
 </div>
 
+<!-- Premium Breakdown Modal -->
+<div class="modal-overlay" id="premiumModal">
+  <div class="modal" style="height:85dvh">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">⚡ Premium Pay Breakdown</div>
+      <button class="modal-close" onclick="closePremiumBreakdown()">✕</button>
+    </div>
+    <div class="modal-body" id="premiumBody"></div>
+  </div>
+</div>
+
+<!-- Paystub Modal -->
+<div class="modal-overlay" id="paystubModal">
+  <div class="modal" style="height:92dvh">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">📄 Paystub Estimate</div>
+      <button class="modal-close" onclick="closePaystub()">✕</button>
+    </div>
+    <div class="modal-body" id="paystubBody">
+      <!-- Filled dynamically -->
+    </div>
+  </div>
+</div>
+
 <script>
 let state = { hourlyRate:0, shifts:[], period:'week', prevPeriod:'week', editingId:null, unscheduled:false, isHoliday:false, calMonth:new Date().getMonth(), calYear:new Date().getFullYear() };
 const CREW_ANCHOR = new Date(2026,4,14);
@@ -867,14 +893,22 @@ function saveShift(){
   } else {
     state.shifts.push(shift);
   }
-  save(); renderAll(); closeShiftModal();
+  save();
+  state.prevPeriod = 'month'; // force strip to fully re-render with updated shifts
+  renderAll();
+  state.prevPeriod = state.period;
+  closeShiftModal();
 }
 
 function deleteShift(){
   if(!state.editingId) return;
   if(!confirm('Delete this shift?')) return;
   state.shifts=state.shifts.filter(s=>s.id!==state.editingId);
-  save(); renderAll(); closeShiftModal();
+  save();
+  state.prevPeriod = 'month'; // force strip to fully re-render with updated shifts
+  renderAll();
+  state.prevPeriod = state.period;
+  closeShiftModal();
 }
 
 function openSettings(){
@@ -903,7 +937,7 @@ function renderPreviewTable(){
     {label:'Unscheduled (11.5h)',hours:11.5,scheduled:false},
   ];
   document.getElementById('previewTable').innerHTML=rows.map(r=>{
-    const pay=calcEarnings(r.hours,rate,r.scheduled);
+    const pay=calcEarnings(r.hours,rate,r.scheduled,false);
     return `<div class="preview-row"><span class="preview-row-label">${r.label}</span><span class="preview-row-val ${!r.scheduled?'text-purple':''}">${fmt(pay)}</span></div>`;
   }).join('');
 }
@@ -970,7 +1004,20 @@ function renderPremiumBreakdown(){
     const d = new Date(s.date + 'T12:00:00');
     const dateLabel = d.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' });
 
-    if(s.isUnscheduled){
+    if(s.isHoliday){
+      // Holiday worked: 1.0× extra per worked hour (double time on shift hours)
+      const premHrs = s.paidHours * 1.0;
+      const premAmt = premHrs * rate;
+      totalPremHrs += premHrs;
+      totalPremAmt += premAmt;
+      rows += `
+        <div class="ps-grid-row" style="grid-template-columns:1fr 1fr 1fr 1fr;background:#fff8ee;">
+          <div style="font-size:11px;font-weight:600;color:#111">${dateLabel}</div>
+          <div style="font-size:10px;color:#ff9900;text-align:center;font-weight:700">🎉 Holiday</div>
+          <div style="font-size:11px;font-family:'DM Mono',monospace;text-align:right;color:#ff9900">${premHrs.toFixed(2)} hrs</div>
+          <div style="font-size:11px;font-family:'DM Mono',monospace;text-align:right;color:#ff9900">$${premAmt.toFixed(2)}</div>
+        </div>`;
+    } else if(s.isUnscheduled){
       // Unscheduled: 0.75× extra per hour
       const premHrs = s.paidHours * 0.75;
       const premAmt = premHrs * rate;
@@ -1045,11 +1092,13 @@ function renderPaystub(){
   const thisWeekShifts = filterShifts(state.shifts, 'week');
 
   // Calculate hours and pay breakdown matching Crown's paystub format
-  let regHrs = 0, otHrs = 0, unscHrs = 0;
-  let holHrs = 0;
+  let regHrs = 0, otHrs = 0, unscHrs = 0, holHrs = 0;
+  let holWorked = false; // track if any holiday was actually worked
+
   thisWeekShifts.forEach(s => {
     if(s.isHoliday){
       holHrs += s.paidHours;
+      holWorked = true;
     } else if(s.isUnscheduled){
       unscHrs += s.paidHours;
     } else {
@@ -1058,23 +1107,31 @@ function renderPaystub(){
     }
   });
 
-  // REGULAR = all worked hours × base rate
-  const totalWorkedHrs = regHrs + otHrs + unscHrs + holHrs;
-  const regAmt = (regHrs + otHrs + unscHrs) * rate; // holiday shown separately
+  // Count how many holiday shifts (each gets 13.25 fixed holiday hrs)
+  const holShiftCount = thisWeekShifts.filter(s => s.isHoliday).length;
 
-  // PREMIUM = (OT × 0.5 × rate) + (Unscheduled × 0.75 × rate) + (Holiday × 2.0 × rate)
-  const premiumHrsEquiv = (otHrs * 0.5) + (unscHrs * 0.75) + (holHrs * 2.0);
+  // REGULAR = (regHrs + otHrs + unscHrs + holHrs) × rate
+  // All worked hours paid at base rate first
+  const totalWorkedHrs = regHrs + otHrs + unscHrs + holHrs;
+  const regAmt = totalWorkedHrs * rate;
+
+  // HOLIDAY = fixed 13.25 hrs × rate per holiday (worked or not)
+  // This is always the same fixed amount per holiday
+  const holFixedHrs = holShiftCount * 13.25;
+  const holAmt = holFixedHrs * rate;
+
+  // PREMIUM breakdown:
+  // OT: 0.5× per OT hr
+  // Unscheduled: 0.75× per unsch hr
+  // Holiday worked: 1.0× per worked hr (makes it double time on top of regular)
+  const premiumHrsEquiv = (otHrs * 0.5) + (unscHrs * 0.75) + (holHrs * 1.0);
   const premiumAmt = premiumHrsEquiv * rate;
 
-  // HOLIDAY = triple time (3.0×)
-  const holidayAmt = holHrs * rate * 3.0;
+  // SHIFT differential: 5% reg, 7.5% OT, 8.75% unsch, 10% holiday (2× the 5%)
+  const shiftAmt = (regHrs * rate * 0.05) + (otHrs * rate * 0.075) + (unscHrs * rate * 0.0875) + (holHrs * rate * 0.10);
 
-  // SHIFT differential: 5% reg, 7.5% OT, 8.75% unsch, 15% holiday (3× the 5%)
-  const shiftAmt = (regHrs * rate * 0.05) + (otHrs * rate * 0.075) + (unscHrs * rate * 0.0875) + (holHrs * rate * 0.15);
-
-  // Gross
-  const gross = regAmt + premiumAmt + (holHrs > 0 ? 0 : 0) + shiftAmt;
-  // Note: holiday already included via regAmt + premiumHrsEquiv (2.0x extra) = 3.0x total
+  // GROSS = regular + holiday fixed + premium + shift diff
+  const gross = regAmt + holAmt + premiumAmt + shiftAmt;
 
   // Deductions (estimates based on Crown WA paystub)
   const fedTax     = gross * 0.13;       // ~13%
@@ -1092,7 +1149,6 @@ function renderPaystub(){
   const periodEnd = new Date(thisMon.getTime() + 6 * 86400000);
   const periodEndStr = periodEnd.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 
-  const totalHrs = regHrs + otHrs;
   const fmtN = n => '$' + n.toFixed(2);
 
   const html = `
@@ -1148,10 +1204,10 @@ function renderPaystub(){
         <div class="ps-numeric">${totalWorkedHrs.toFixed(2)}</div>
         <div class="ps-numeric">${fmtN(regAmt)}</div>
       </div>
-      ${holHrs > 0 ? `<div class="ps-grid-row ps-earn-row" style="background:#fff8ee">
-        <div style="color:#ff9900;font-weight:800">HOLIDAY (3.0×)</div>
-        <div class="ps-numeric" style="color:#ff9900">${holHrs.toFixed(2)}</div>
-        <div class="ps-numeric" style="color:#ff9900">${fmtN(holHrs * rate * 3.0)}</div>
+      ${holFixedHrs > 0 ? `<div class="ps-grid-row ps-earn-row" style="background:#fff8ee">
+        <div style="color:#ff9900;font-weight:800">HOLIDAY</div>
+        <div class="ps-numeric" style="color:#ff9900">${holFixedHrs.toFixed(2)}</div>
+        <div class="ps-numeric" style="color:#ff9900">${fmtN(holAmt)}</div>
       </div>` : ''}
       ${premiumHrsEquiv > 0 ? `<div class="ps-grid-row ps-earn-row">
         <div>PREMIUM</div>
@@ -1165,7 +1221,7 @@ function renderPaystub(){
       </div>
       <div class="ps-grid-row ps-earn-row total">
         <div>Gross Total</div>
-        <div class="ps-numeric">${totalWorkedHrs.toFixed(2)}</div>
+        <div class="ps-numeric">${(totalWorkedHrs + holFixedHrs).toFixed(2)}</div>
         <div class="ps-numeric">${fmtN(gross)}</div>
       </div>
 
@@ -1213,8 +1269,8 @@ function renderPaystub(){
       </div>
 
       <div class="ps-note">
-        Estimates based on This Week earnings. Actual paystub may vary.<br>
-        Estimates based on Washington state Crown paystub. Shift: 5%/7.5%/8.75% · Premium: 0.5×OT + 0.75×unsch · Deductions: Fed 13%, SS 6.2%, Medicare 1.45%, WC 0.17%, 401k 2%, WA PFL 0.81%, WA LTC 0.58%
+        Estimated paystub based on This Week shifts · Washington state Crown rates<br>
+        Shift diff: 5% reg / 7.5% OT / 8.75% unsch / 10% holiday · Deductions: Fed 13%, SS 6.2%, Medicare 1.45%, WC 0.17%, 401k 2%, WA PFL 0.81%, WA LTC 0.58%
       </div>
     </div>
   `;
@@ -1239,32 +1295,5 @@ load();
 if(state.hourlyRate>0){autoPopulateCrewShifts();save();}
 renderAll();
 </script>
-
-<!-- Premium Breakdown Modal -->
-<div class="modal-overlay" id="premiumModal">
-  <div class="modal" style="height:85dvh">
-    <div class="modal-handle"></div>
-    <div class="modal-header">
-      <div class="modal-title">⚡ Premium Pay Breakdown</div>
-      <button class="modal-close" onclick="closePremiumBreakdown()">✕</button>
-    </div>
-    <div class="modal-body" id="premiumBody"></div>
-  </div>
-</div>
-
-<!-- Paystub Modal -->
-<div class="modal-overlay" id="paystubModal">
-  <div class="modal" style="height:92dvh">
-    <div class="modal-handle"></div>
-    <div class="modal-header">
-      <div class="modal-title">📄 Paystub Estimate</div>
-      <button class="modal-close" onclick="closePaystub()">✕</button>
-    </div>
-    <div class="modal-body" id="paystubBody">
-      <!-- Filled dynamically -->
-    </div>
-  </div>
-</div>
-
 </body>
 </html>
