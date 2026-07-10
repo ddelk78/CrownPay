@@ -28,6 +28,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .period-tab{padding:8px 4px;text-align:center;border-radius:8px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;transition:all .15s}
 .period-tab.active{background:var(--accent);color:#fff}
 .strip-label{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.strip-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.strip-head .strip-label{margin-bottom:0}
+.strip-nav{display:flex;gap:6px}
+.strip-nav-btn{width:32px;height:32px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+.strip-nav-btn:active{background:var(--border)}
 .strip-scroll{display:flex;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
 .strip-scroll::-webkit-scrollbar{display:none}
 .strip-week{flex-shrink:0;width:calc(min(100vw,480px) - 32px);display:flex;scroll-snap-align:start}

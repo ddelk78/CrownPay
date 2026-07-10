@@ -225,7 +225,13 @@ function scrollStripToPeriod(){
 
 function renderStrip(){
   const container = document.getElementById('scheduleContainer');
-  container.innerHTML = `<div class="strip-label">🗓 Schedule — Tap Any Night</div><div class="strip-scroll" id="scheduleStrip"></div>`;
+  container.innerHTML = `<div class="strip-head">
+    <div class="strip-label">🗓 Schedule — Tap Any Night</div>
+    <div class="strip-nav">
+      <button class="strip-nav-btn" onclick="stripNav(-1)" title="Previous week">‹</button>
+      <button class="strip-nav-btn" onclick="stripNav(1)" title="Next week">›</button>
+    </div>
+  </div><div class="strip-scroll" id="scheduleStrip"></div>`;
   const strip = document.getElementById('scheduleStrip');
   const today = startOfDay(new Date());
   const todayMs = today.getTime();
@@ -276,11 +282,25 @@ function renderStrip(){
     html += `</div>`;
   });
   strip.innerHTML = html;
+  // Desktop: let a normal mouse wheel scroll the strip horizontally
+  strip.addEventListener('wheel', e => {
+    if(Math.abs(e.deltaY) > Math.abs(e.deltaX)){
+      e.preventDefault();
+      strip.scrollBy({ left: e.deltaY > 0 ? strip.clientWidth : -strip.clientWidth, behavior: 'smooth' });
+    }
+  }, { passive: false });
   requestAnimationFrame(() => {
     const targetWi = state.period === 'last' ? snapWi : todayWi;
     const el = document.getElementById('week-' + targetWi);
     if(el) el.scrollIntoView({ inline: 'start', block: 'nearest', behavior: 'smooth' });
   });
+}
+
+function stripNav(dir){
+  const strip = document.getElementById('scheduleStrip');
+  if(!strip) return;
+  const week = strip.querySelector('.strip-week');
+  strip.scrollBy({ left: dir * (week ? week.offsetWidth : strip.clientWidth), behavior: 'smooth' });
 }
 
 function calNav(dir){
