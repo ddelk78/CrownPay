@@ -30,8 +30,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .strip-label{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
 .strip-scroll{display:flex;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
 .strip-scroll::-webkit-scrollbar{display:none}
-.strip-week{flex-shrink:0;width:calc(100vw - 32px);display:flex;scroll-snap-align:start}
-.strip-day{flex-shrink:0;width:calc((100vw - 32px)/7);height:72px;background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;transition:transform .1s}
+.strip-week{flex-shrink:0;width:calc(min(100vw,480px) - 32px);display:flex;scroll-snap-align:start}
+.strip-day{flex-shrink:0;width:calc((min(100vw,480px) - 32px)/7);height:72px;background:var(--surface);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;transition:transform .1s}
 .strip-day:active{transform:scale(.93)}
 .strip-day.today{border-color:var(--accent)}
 .strip-day.strip-past{opacity:.5}
