@@ -29,7 +29,7 @@
 
   <div class="summary-card">
     <div class="summary-top">
-      <div class="summary-label">Est. Gross Pay</div>
+      <div class="summary-label" id="summaryLabel">Est. Gross Pay</div>
       <div class="summary-amount" id="totalEarnings">$0.00</div>
     </div>
     <div class="summary-stats">
@@ -151,6 +151,19 @@
         <div class="seg" id="shiftSeg">
           <div class="seg-btn" data-val="night" onclick="setShiftType('night')">🌙 Nights</div>
           <div class="seg-btn" data-val="day" onclick="setShiftType('day')">☀️ Days</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="form-label">Deduction Estimates (paystub)</div>
+        <div class="form-row">
+          <div class="form-group">
+            <div class="form-label" style="font-size:9px">Fed Tax %</div>
+            <input type="number" class="form-input" id="fedPctInput" step="0.1" min="0" max="60" inputmode="decimal">
+          </div>
+          <div class="form-group">
+            <div class="form-label" style="font-size:9px">401k %</div>
+            <input type="number" class="form-input" id="k401PctInput" step="0.1" min="0" max="60" inputmode="decimal">
+          </div>
         </div>
       </div>
       <div>

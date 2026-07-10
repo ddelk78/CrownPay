@@ -11,9 +11,16 @@ full pay period against the exact deployed code (verified byte-identical to the 
 - ✅ M2/L3 — 0-hour and sub-30-minute shifts are rejected with a warning (unworked holidays still save correctly)
 - ✅ NEW (Round 2, Aisha) — Paystub was still adding the 5% differential for day-shift crews while the summary correctly didn't ($1,431 vs $1,493.10); paystub now matches to the penny and hides the SHIFT DIFF line on days
 
-**Still open (low, by design or cosmetic):** L1 (projection totals unlabeled), L2 (old-crew
-history on "off" days), L4 (clearing rate silently keeps old rate), L5 (no past-week paystub),
-L6 (deductions are estimates).
+## Status after Round 3 (low-severity cleanup — all verified by automated checks)
+
+- ✅ L1 — Summary label now reads "Est. Gross Pay · incl. upcoming" whenever the total contains shifts not yet worked
+- ✅ L2 — Logged shifts from a previous crew now render as logged (green ✓) in the strip and calendar even on days the current crew is off
+- ✅ L4 — Clearing the rate field asks for confirmation; invalid input is rejected with a message instead of being silently ignored
+- ✅ L5 — Paystub now has ‹ › week navigation: view last week's (or any week's) estimate, labeled current/last week/upcoming; reopens on the current week
+- ✅ L6 — Federal withholding % and 401k % are now adjustable in Settings (defaults 13% / 2%), shown on the paystub deduction lines, persisted, and included in backups
+
+**Still open (documented limitations):** deductions remain estimates (flat percentages, no
+tax brackets); Social Security/Medicare/WA rates are fixed.
 
 ---
 

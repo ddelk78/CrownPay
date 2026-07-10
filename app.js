@@ -6,6 +6,9 @@ let state = {
   shifts: [],
   removedDates: [],   // dates the user deleted — auto-populate will never resurrect these
   scheduleStart: null, // earliest date auto-populate may fill (set to today on crew switches)
+  fedPct: 13,          // estimated federal withholding % (Settings)
+  k401Pct: 2,          // 401k pre-tax contribution % (Settings)
+  psWeek: 0,           // paystub week offset: 0 = current, -1 = last week, ...
   period: 'week',
   prevPeriod: 'week',
   editingId: null,
@@ -121,6 +124,13 @@ function filterShifts(shifts, period){
   });
 }
 
+// Shifts falling in the week at `off` weeks from the current one (0 = this week)
+function shiftsForWeekOffset(off){
+  const mon = addDays(getThisWeekMonday(), 7 * (off || 0));
+  const next = addDays(mon, 7);
+  return state.shifts.filter(s => { const d = strToDate(s.date); return d >= mon && d < next; });
+}
+
 // ── Persistence ──
 function save(){
   localStorage.setItem('crownpay_shifts', JSON.stringify(state.shifts));
@@ -129,6 +139,8 @@ function save(){
   localStorage.setItem('crownpay_crew', state.crew);
   localStorage.setItem('crownpay_shift', state.shiftType);
   localStorage.setItem('crownpay_schedstart', state.scheduleStart || '');
+  localStorage.setItem('crownpay_fedpct', String(state.fedPct));
+  localStorage.setItem('crownpay_401kpct', String(state.k401Pct));
 }
 
 function load(){
@@ -148,6 +160,10 @@ function load(){
   if(sh === 'night' || sh === 'day') state.shiftType = sh;
   const ss = localStorage.getItem('crownpay_schedstart');
   if(ss) state.scheduleStart = ss;
+  const fp = parseFloat(localStorage.getItem('crownpay_fedpct'));
+  if(!isNaN(fp) && fp >= 0 && fp <= 60) state.fedPct = fp;
+  const kp = parseFloat(localStorage.getItem('crownpay_401kpct'));
+  if(!isNaN(kp) && kp >= 0 && kp <= 60) state.k401Pct = kp;
   // Migrate holiday shifts saved before the "worked / not worked" split
   state.shifts.forEach(s => { if(s.isHoliday && s.holidayWorked === undefined) s.holidayWorked = true; });
 }
@@ -213,6 +229,9 @@ function renderSummary(){
     if(s.isUnscheduled) uc++;
   });
   document.getElementById('totalEarnings').textContent = fmt(te);
+  // L1: make it obvious when the total includes shifts not yet worked
+  const lbl = document.getElementById('summaryLabel');
+  if(lbl) lbl.textContent = visible.some(s => s.date > todayStr()) ? 'Est. Gross Pay · incl. upcoming' : 'Est. Gross Pay';
   document.getElementById('statPaidHrs').textContent = tp.toFixed(1) + 'h';
   document.getElementById('statRegHrs').textContent = tr.toFixed(1) + 'h';
   document.getElementById('statOtHrs').textContent = tot.toFixed(1) + 'h';
@@ -293,7 +312,7 @@ function renderStrip(){
       let cls = 'strip-day', icon = '—';
       if(hol){ cls += ' strip-hol'; icon = '🎉'; }               // was: holiday shifts were invisible in strip view
       else if(unsc){ cls += ' strip-ot'; icon = '⭐'; }
-      else if(isA && logged){ cls += ' strip-logged'; icon = '✓'; }
+      else if(logged){ cls += ' strip-logged'; icon = '✓'; } // L2: show logged shifts even on days the current crew is "off" (old-crew history)
       else if(isA){ icon = state.shiftType === 'day' ? '☀️' : '🌙'; if(isPast) cls += ' strip-past'; }
       else { cls += ' strip-b'; icon = '·'; }
       if(isToday) cls += ' today';
@@ -382,7 +401,7 @@ function renderCalendar(){
       cls += ' ot-day';
       icon = '⭐';
       if(state.hourlyRate > 0) payStr = fmtShort(calcShiftPay(unsc, state.hourlyRate).total);
-    } else if(isA && logged){
+    } else if(logged){ // L2: old-crew history still shows as logged
       cls += ' a-logged';
       icon = '<span style="color:#007700;font-size:9px;font-weight:900">✓</span>';
       if(state.hourlyRate > 0) payStr = fmtShort(calcShiftPay(logged, state.hourlyRate).total);
@@ -635,6 +654,8 @@ function deleteShift(){
 // ── Settings ──
 function openSettings(){
   document.getElementById('rateInput').value = state.hourlyRate > 0 ? state.hourlyRate.toFixed(2) : '';
+  document.getElementById('fedPctInput').value = state.fedPct;
+  document.getElementById('k401PctInput').value = state.k401Pct;
   pendingCrew = state.crew; pendingShiftType = state.shiftType;
   renderSegs();
   renderPreviewTable();
@@ -662,8 +683,18 @@ function updateRulesText(){
 function closeSettings(){ document.getElementById('settingsModal').classList.remove('open'); }
 
 function saveSettings(){
-  const r = parseFloat(document.getElementById('rateInput').value);
+  const rawRate = document.getElementById('rateInput').value.trim();
+  const r = parseFloat(rawRate);
   const rateOk = !isNaN(r) && r > 0;
+  // L4: don't silently ignore what the user typed
+  if(rawRate !== '' && !rateOk){ alert('⚠️ Please enter a valid hourly rate.'); return; }
+  if(rawRate === '' && state.hourlyRate > 0){
+    if(!confirm('Rate field is empty — keep your current rate of $' + state.hourlyRate.toFixed(2) + '?')) return;
+  }
+  const fp = parseFloat(document.getElementById('fedPctInput').value);
+  if(!isNaN(fp) && fp >= 0 && fp <= 60) state.fedPct = fp;
+  const kp = parseFloat(document.getElementById('k401PctInput').value);
+  if(!isNaN(kp) && kp >= 0 && kp <= 60) state.k401Pct = kp;
   const firstRate = rateOk && state.hourlyRate === 0;
   const crewChanged = pendingCrew !== state.crew || pendingShiftType !== state.shiftType;
   if(crewChanged && state.shifts.length > 0){
@@ -698,7 +729,7 @@ function renderPreviewTable(){
 
 // ── Backup / restore ──
 function exportData(){
-  const backup = { version: 3, exportedAt: new Date().toISOString(), hourlyRate: state.hourlyRate, shifts: state.shifts, removedDates: state.removedDates, crew: state.crew, shiftType: state.shiftType };
+  const backup = { version: 3, exportedAt: new Date().toISOString(), hourlyRate: state.hourlyRate, shifts: state.shifts, removedDates: state.removedDates, crew: state.crew, shiftType: state.shiftType, scheduleStart: state.scheduleStart, fedPct: state.fedPct, k401Pct: state.k401Pct };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -734,6 +765,9 @@ function importData(event){
       if(state.hourlyRate === 0 && backup.hourlyRate > 0) state.hourlyRate = backup.hourlyRate;
       if(backup.crew === 'A' || backup.crew === 'B') state.crew = backup.crew;
       if(backup.shiftType === 'night' || backup.shiftType === 'day') state.shiftType = backup.shiftType;
+      if(backup.scheduleStart) state.scheduleStart = backup.scheduleStart;
+      if(typeof backup.fedPct === 'number' && backup.fedPct >= 0 && backup.fedPct <= 60) state.fedPct = backup.fedPct;
+      if(typeof backup.k401Pct === 'number' && backup.k401Pct >= 0 && backup.k401Pct <= 60) state.k401Pct = backup.k401Pct;
       updateRulesText();
       state.shifts.sort((a, b) => a.date < b.date ? -1 : 1);
       save(); renderAll(true); closeSettings();
@@ -745,14 +779,15 @@ function importData(event){
 }
 
 // ── Paystub ──
-function openPaystub(){ renderPaystub(); document.getElementById('paystubModal').classList.add('open'); }
+function openPaystub(){ state.psWeek = 0; renderPaystub(); document.getElementById('paystubModal').classList.add('open'); }
+function psNav(d){ state.psWeek += d; renderPaystub(); } // L5: browse past/future weeks
 function closePaystub(){ document.getElementById('paystubModal').classList.remove('open'); }
 function openPremiumBreakdown(){ renderPremiumBreakdown(); document.getElementById('premiumModal').classList.add('open'); }
 function closePremiumBreakdown(){ document.getElementById('premiumModal').classList.remove('open'); }
 
 function renderPremiumBreakdown(){
   const rate = state.hourlyRate;
-  const thisWeekShifts = filterShifts(state.shifts, 'week');
+  const thisWeekShifts = shiftsForWeekOffset(state.psWeek);
 
   let rows = '';
   let totalPremHrs = 0, totalPremAmt = 0;
@@ -818,7 +853,7 @@ function renderPremiumBreakdown(){
 
 function renderPaystub(){
   const rate = state.hourlyRate;
-  const thisWeekShifts = filterShifts(state.shifts, 'week');
+  const thisWeekShifts = shiftsForWeekOffset(state.psWeek);
 
   let regHrs = 0, otH = 0, unscHrs = 0, holHrs = 0, holCount = 0;
   thisWeekShifts.forEach(s => {
@@ -851,8 +886,8 @@ function renderPaystub(){
   const gross = regAmt + holAmt + premiumAmt + shiftAmt;
 
   // Deductions (estimates based on Crown WA paystub)
-  const k401Before  = gross * 0.02;                    // 2% 401k pre-tax
-  const fedTax      = (gross - k401Before) * 0.13;     // ~13% — on taxable income AFTER pre-tax 401k
+  const k401Before  = gross * (state.k401Pct / 100);             // 401k pre-tax (set in Settings)
+  const fedTax      = (gross - k401Before) * (state.fedPct / 100); // fed withholding (Settings), after pre-tax 401k
   const socSec      = gross * 0.062;                   // 6.2% (401k is still FICA-taxable)
   const medicare    = gross * 0.0145;                  // 1.45%
   const workersComp = gross * 0.00172;                 // ~0.17%
@@ -861,12 +896,20 @@ function renderPaystub(){
   const totalDed    = fedTax + socSec + medicare + workersComp + k401Before + waFamLeave + waLTC;
   const netPay      = gross - totalDed;
 
-  const periodEnd = addDays(getThisWeekMonday(), 6);
+  const periodStart = addDays(getThisWeekMonday(), 7 * state.psWeek);
+  const periodEnd = addDays(periodStart, 6);
+  const fmtMD = d => d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' });
   const periodEndStr = periodEnd.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+  const weekTag = state.psWeek === 0 ? ' · current' : state.psWeek === -1 ? ' · last week' : state.psWeek > 0 ? ' · upcoming' : '';
 
   const fmtN = n => '$' + n.toFixed(2);
 
   const html = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <button class="strip-nav-btn" onclick="psNav(-1)" title="Previous week">‹</button>
+      <div style="font-size:12px;font-weight:700;color:var(--muted)">Week ${fmtMD(periodStart)} – ${periodEndStr}${weekTag}</div>
+      <button class="strip-nav-btn" onclick="psNav(1)" title="Next week">›</button>
+    </div>
     <div class="ps-wrap">
 
       <div class="ps-banner">
@@ -954,11 +997,11 @@ function renderPaystub(){
         <div>Description</div>
         <div class="ps-numeric">Amount</div>
       </div>
-      <div class="ps-grid-row ps-ded-row"><div>FED INCOME TAX</div><div class="ps-numeric">${fmtN(fedTax)}</div></div>
+      <div class="ps-grid-row ps-ded-row"><div>FED INCOME TAX (${state.fedPct}%)</div><div class="ps-numeric">${fmtN(fedTax)}</div></div>
       <div class="ps-grid-row ps-ded-row"><div>SOC SEC</div><div class="ps-numeric">${fmtN(socSec)}</div></div>
       <div class="ps-grid-row ps-ded-row"><div>MEDICARE</div><div class="ps-numeric">${fmtN(medicare)}</div></div>
       <div class="ps-grid-row ps-ded-row"><div>WORKERS COMP</div><div class="ps-numeric">${fmtN(workersComp)}</div></div>
-      <div class="ps-grid-row ps-ded-row"><div>401K BEFORE TAX</div><div class="ps-numeric">${fmtN(k401Before)}</div></div>
+      <div class="ps-grid-row ps-ded-row"><div>401K BEFORE TAX (${state.k401Pct}%)</div><div class="ps-numeric">${fmtN(k401Before)}</div></div>
       <div class="ps-grid-row ps-ded-row"><div>WA FAMILY LEAVE</div><div class="ps-numeric">${fmtN(waFamLeave)}</div></div>
       <div class="ps-grid-row ps-ded-row"><div>WA LTC</div><div class="ps-numeric">${fmtN(waLTC)}</div></div>
       <div class="ps-grid-row ps-ded-row total"><div>Total Deductions</div><div class="ps-numeric">${fmtN(totalDed)}</div></div>
@@ -981,10 +1024,13 @@ function renderPaystub(){
 function resetAllData(){
   if(!confirm('Reset everything? This deletes all shifts and your hourly rate. Cannot be undone.')) return;
   state.shifts = []; state.hourlyRate = 0; state.removedDates = []; state.scheduleStart = null;
+  state.fedPct = 13; state.k401Pct = 2;
   localStorage.removeItem('crownpay_shifts');
   localStorage.removeItem('crownpay_rate');
   localStorage.removeItem('crownpay_removed');
   localStorage.removeItem('crownpay_schedstart');
+  localStorage.removeItem('crownpay_fedpct');
+  localStorage.removeItem('crownpay_401kpct');
   renderAll(); closeSettings();
 }
 
