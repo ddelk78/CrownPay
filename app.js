@@ -13,7 +13,10 @@ let state = {
   holidayWorked: true,
   calMonth: new Date().getMonth(),
   calYear: new Date().getFullYear(),
+  crew: 'A',            // 'A' or 'B' — B works exactly the days A is off
+  shiftType: 'night',   // 'night' (6PM–6AM, gets 5% diff) or 'day' (6AM–6PM, no diff)
 };
+let pendingCrew = 'A', pendingShiftType = 'night'; // settings selections before Save
 const CREW_ANCHOR = new Date(2026, 4, 14);
 const SHIFT_DIFF = 0.05;          // flat 5% of base wage, on worked hours
 const HOLIDAY_FLAT_HRS = 13.25;   // flat holiday pay — received worked or not
@@ -31,7 +34,14 @@ function escapeHtml(str){
 
 function isScheduledDay(date){
   const diff = Math.round((startOfDay(date) - startOfDay(CREW_ANCHOR)) / 86400000);
-  return (((diff % 8) + 8) % 8) < 4;
+  const aOn = (((diff % 8) + 8) % 8) < 4;
+  return state.crew === 'B' ? !aOn : aOn; // B Crew works exactly the days A is off
+}
+
+function defaultTimes(st){
+  return (st || state.shiftType) === 'day'
+    ? { start: '06:00', end: '18:00', startDisplay: '6:00 AM', endDisplay: '6:00 PM' }
+    : { start: '18:00', end: '06:00', startDisplay: '6:00 PM', endDisplay: '6:00 AM' };
 }
 
 function getThisWeekMonday(){
@@ -58,29 +68,30 @@ function calcPaidHours(startStr, endStr){
    shiftDiff — flat 5% of base wage on worked hours (SHIFT DIFF line)
    total     — gross for this shift (matches paystub)
 */
-function calcShiftPay(s, rate){
+function calcShiftPay(s, rate, shiftTypeOverride){
   const r = { base: 0, premium: 0, premHrs: 0, holFlat: 0, shiftDiff: 0, total: 0 };
   if(!rate || rate <= 0) return r;
   const hrs = s.paidHours || 0;
+  const diffPct = ((shiftTypeOverride || state.shiftType) === 'night') ? SHIFT_DIFF : 0; // 5% differential is nights only
   if(s.isHoliday){
     r.holFlat = HOLIDAY_FLAT_HRS * rate;
     if(s.holidayWorked !== false){
       r.base = hrs * rate;
       r.premHrs = hrs * 0.5;
       r.premium = r.premHrs * rate;
-      r.shiftDiff = hrs * rate * SHIFT_DIFF;
+      r.shiftDiff = hrs * rate * diffPct;
     }
   } else if(s.isUnscheduled){
     r.base = hrs * rate;
     r.premHrs = hrs * 0.75;
     r.premium = r.premHrs * rate;
-    r.shiftDiff = hrs * rate * SHIFT_DIFF;
+    r.shiftDiff = hrs * rate * diffPct;
   } else {
     r.base = hrs * rate;
     const ot = Math.max(0, hrs - 8);
     r.premHrs = ot * 0.5;
     r.premium = r.premHrs * rate;
-    r.shiftDiff = hrs * rate * SHIFT_DIFF;
+    r.shiftDiff = hrs * rate * diffPct;
   }
   r.total = r.base + r.premium + r.holFlat + r.shiftDiff;
   return r;
@@ -114,6 +125,8 @@ function save(){
   localStorage.setItem('crownpay_shifts', JSON.stringify(state.shifts));
   localStorage.setItem('crownpay_rate', String(state.hourlyRate));
   localStorage.setItem('crownpay_removed', JSON.stringify(state.removedDates));
+  localStorage.setItem('crownpay_crew', state.crew);
+  localStorage.setItem('crownpay_shift', state.shiftType);
 }
 
 function load(){
@@ -127,6 +140,10 @@ function load(){
     const rm = localStorage.getItem('crownpay_removed');
     if(rm) state.removedDates = JSON.parse(rm) || [];
   } catch(e){ state.removedDates = []; }
+  const c = localStorage.getItem('crownpay_crew');
+  if(c === 'A' || c === 'B') state.crew = c;
+  const sh = localStorage.getItem('crownpay_shift');
+  if(sh === 'night' || sh === 'day') state.shiftType = sh;
   // Migrate holiday shifts saved before the "worked / not worked" split
   state.shifts.forEach(s => { if(s.isHoliday && s.holidayWorked === undefined) s.holidayWorked = true; });
 }
@@ -144,14 +161,15 @@ function autoPopulateCrewShifts(){
   const end = new Date(today.getFullYear(), today.getMonth() + 2, 0);
   const removed = new Set(state.removedDates);
   const haveDate = new Set(state.shifts.map(s => s.date));
+  const dt = defaultTimes();
   let cur = new Date(start);
   while(cur <= end){
     const dateStr = dateToStr(cur);
     if(isScheduledDay(cur) && !haveDate.has(dateStr) && !removed.has(dateStr)){
       state.shifts.push({
         id: crypto.randomUUID(), date: dateStr,
-        startTime: '18:00', endTime: '06:00',
-        startDisplay: '6:00 PM', endDisplay: '6:00 AM',
+        startTime: dt.start, endTime: dt.end,
+        startDisplay: dt.startDisplay, endDisplay: dt.endDisplay,
         paidHours: 11.5, isUnscheduled: false, isHoliday: false, note: '',
       });
     }
@@ -226,7 +244,7 @@ function scrollStripToPeriod(){
 function renderStrip(){
   const container = document.getElementById('scheduleContainer');
   container.innerHTML = `<div class="strip-head">
-    <div class="strip-label">🗓 Schedule — Tap Any Night</div>
+    <div class="strip-label">🗓 Schedule — Tap Any ${state.shiftType === 'day' ? 'Day' : 'Night'}</div>
     <div class="strip-nav">
       <button class="strip-nav-btn" onclick="stripNav(-1)" title="Previous week">‹</button>
       <button class="strip-nav-btn" onclick="stripNav(1)" title="Next week">›</button>
@@ -269,7 +287,7 @@ function renderStrip(){
       if(hol){ cls += ' strip-hol'; icon = '🎉'; }               // was: holiday shifts were invisible in strip view
       else if(unsc){ cls += ' strip-ot'; icon = '⭐'; }
       else if(isA && logged){ cls += ' strip-logged'; icon = '✓'; }
-      else if(isA){ icon = '🌙'; if(isPast) cls += ' strip-past'; }
+      else if(isA){ icon = state.shiftType === 'day' ? '☀️' : '🌙'; if(isPast) cls += ' strip-past'; }
       else { cls += ' strip-b'; icon = '·'; }
       if(isToday) cls += ' today';
       html += `<div class="${cls}" onclick="stripDayTapped('${dateStr}')">
@@ -363,7 +381,7 @@ function renderCalendar(){
       if(state.hourlyRate > 0) payStr = fmtShort(calcShiftPay(logged, state.hourlyRate).total);
     } else if(isA){
       cls += ' a-crew';
-      icon = isPast ? '·' : '🌙';
+      icon = isPast ? '·' : (state.shiftType === 'day' ? '☀️' : '🌙');
     } else {
       cls += ' b-crew';
     }
@@ -378,8 +396,8 @@ function renderCalendar(){
 
   html += `</div>
     <div class="cal-legend">
-      <div class="cal-legend-item"><div class="cal-legend-dot" style="background:rgba(255,80,80,0.5)"></div>A Crew</div>
-      <div class="cal-legend-item"><div class="cal-legend-dot" style="background:rgba(80,140,255,0.5)"></div>B Crew</div>
+      <div class="cal-legend-item"><div class="cal-legend-dot" style="background:rgba(255,80,80,0.5)"></div>${state.crew} Crew (my days)</div>
+      <div class="cal-legend-item"><div class="cal-legend-dot" style="background:rgba(80,140,255,0.5)"></div>Off days</div>
       <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#4fbb80"></div>Logged</div>
       <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#cc9900"></div>⭐ Unscheduled</div>
       <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#FFD700"></div>🎉 Holiday</div>
@@ -453,8 +471,8 @@ function stripDayTapped(dateStr){
   state.editingId = null; state.unscheduled = !isA; state.isHoliday = false; state.holidayWorked = true;
   document.getElementById('shiftModalTitle').textContent = 'Add Shift';
   document.getElementById('shiftDate').value = dateStr;
-  document.getElementById('shiftStart').value = '18:00';
-  document.getElementById('shiftEnd').value = '06:00';
+  document.getElementById('shiftStart').value = defaultTimes().start;
+  document.getElementById('shiftEnd').value = defaultTimes().end;
   document.getElementById('shiftNote').value = '';
   document.getElementById('shiftDeleteBtn').style.display = 'none';
   setModalToggles();
@@ -466,8 +484,8 @@ function openAddShift(){
   state.editingId = null; state.unscheduled = false; state.isHoliday = false; state.holidayWorked = true;
   document.getElementById('shiftModalTitle').textContent = 'Add Shift';
   document.getElementById('shiftDate').value = todayStr();
-  document.getElementById('shiftStart').value = '18:00';
-  document.getElementById('shiftEnd').value = '06:00';
+  document.getElementById('shiftStart').value = defaultTimes().start;
+  document.getElementById('shiftEnd').value = defaultTimes().end;
   document.getElementById('shiftNote').value = '';
   document.getElementById('shiftDeleteBtn').style.display = 'none';
   setModalToggles();
@@ -520,13 +538,16 @@ function updateCrewIndicator(){
   const ind = document.getElementById('crewIndicator');
   if(!v) return;
   const sched = isScheduledDay(strToDate(v));
+  const word = state.shiftType === 'day' ? 'day' : 'night';
   ind.className = 'crew-indicator ' + (sched ? 'scheduled' : 'off');
-  ind.innerHTML = sched ? '<span>✓</span> A Crew scheduled night' : '<span>–</span> Not a scheduled A Crew night';
+  ind.innerHTML = sched
+    ? `<span>✓</span> ${state.crew} Crew scheduled ${word}`
+    : `<span>–</span> Not a scheduled ${state.crew} Crew ${word}`;
 }
 
 function updateShiftPreview(){
-  const st = document.getElementById('shiftStart').value || '18:00';
-  const en = document.getElementById('shiftEnd').value || '06:00';
+  const st = document.getElementById('shiftStart').value || defaultTimes().start;
+  const en = document.getElementById('shiftEnd').value || defaultTimes().end;
   const worked = !state.isHoliday || state.holidayWorked;
   const paid = worked ? calcPaidHours(st, en) : 0;
   const temp = { paidHours: paid, isUnscheduled: state.unscheduled, isHoliday: state.isHoliday, holidayWorked: state.holidayWorked };
@@ -596,40 +617,70 @@ function deleteShift(){
 // ── Settings ──
 function openSettings(){
   document.getElementById('rateInput').value = state.hourlyRate > 0 ? state.hourlyRate.toFixed(2) : '';
+  pendingCrew = state.crew; pendingShiftType = state.shiftType;
+  renderSegs();
   renderPreviewTable();
   document.getElementById('settingsModal').classList.add('open');
+}
+
+function renderSegs(){
+  document.querySelectorAll('#crewSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.val === pendingCrew));
+  document.querySelectorAll('#shiftSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.val === pendingShiftType));
+}
+
+function setCrew(c){ pendingCrew = c; renderSegs(); renderPreviewTable(); }
+function setShiftType(t){ pendingShiftType = t; renderSegs(); renderPreviewTable(); }
+
+function updateRulesText(){
+  const day = state.shiftType === 'day';
+  const e1 = document.getElementById('ruleHours');
+  if(e1) e1.textContent = day ? '6 AM → 6 PM (12 hrs gross)' : '6 PM → 6 AM (12 hrs gross)';
+  const e2 = document.getElementById('ruleRotation');
+  if(e2) e2.textContent = `${state.crew} Crew ${day ? 'Days' : 'Nights'} — 4 ON / 4 OFF`;
+  const e3 = document.getElementById('ruleDiff');
+  if(e3) e3.textContent = day ? 'Nights only — no differential on day shift' : 'Flat 5% of base wage on worked hours';
 }
 
 function closeSettings(){ document.getElementById('settingsModal').classList.remove('open'); }
 
 function saveSettings(){
   const r = parseFloat(document.getElementById('rateInput').value);
-  if(!isNaN(r) && r > 0){
-    const first = state.hourlyRate === 0;
-    state.hourlyRate = r;
-    if(first) autoPopulateCrewShifts();
+  const rateOk = !isNaN(r) && r > 0;
+  const firstRate = rateOk && state.hourlyRate === 0;
+  const crewChanged = pendingCrew !== state.crew || pendingShiftType !== state.shiftType;
+  if(crewChanged && state.shifts.length > 0){
+    const name = pendingCrew + ' Crew ' + (pendingShiftType === 'day' ? 'Days' : 'Nights');
+    if(!confirm('Switch to ' + name + '? Upcoming auto-filled shifts will be rebuilt for the new schedule. Past shifts, unscheduled days, holidays and shifts with notes are kept.')) return;
+    // Drop future auto-filled scheduled shifts; keep history and anything special
+    const t = todayStr();
+    state.shifts = state.shifts.filter(s => s.date < t || s.isUnscheduled || s.isHoliday || (s.note && s.note.trim()));
   }
-  save(); renderAll(); closeSettings();
+  state.crew = pendingCrew;
+  state.shiftType = pendingShiftType;
+  if(rateOk) state.hourlyRate = r;
+  if(state.hourlyRate > 0 && (firstRate || crewChanged)) autoPopulateCrewShifts();
+  updateRulesText();
+  save(); renderAll(true); closeSettings();
 }
 
 function renderPreviewTable(){
   const rate = parseFloat(document.getElementById('rateInput').value) || state.hourlyRate;
+  const word = pendingShiftType === 'day' ? 'day' : 'night';
   const rows = [
-    { label: 'Standard night (11.5h)', shift: { paidHours: 11.5 } },
-    { label: 'Short shift (8h)', shift: { paidHours: 8 } },
+    { label: `Standard ${word} (11.5h)`, shift: { paidHours: 11.5 } },
     { label: 'Unscheduled (11.5h)', shift: { paidHours: 11.5, isUnscheduled: true }, cls: 'text-purple' },
     { label: 'Holiday worked (11.5h)', shift: { paidHours: 11.5, isHoliday: true, holidayWorked: true }, style: 'color:#FFD700' },
     { label: 'Holiday not worked', shift: { paidHours: 0, isHoliday: true, holidayWorked: false }, style: 'color:#FFD700' },
   ];
   document.getElementById('previewTable').innerHTML = rows.map(r => {
-    const pay = calcShiftPay(r.shift, rate).total;
+    const pay = calcShiftPay(r.shift, rate, pendingShiftType).total;
     return `<div class="preview-row"><span class="preview-row-label">${r.label}</span><span class="preview-row-val ${r.cls || ''}" ${r.style ? `style="${r.style}"` : ''}>${fmt(pay)}</span></div>`;
   }).join('');
 }
 
 // ── Backup / restore ──
 function exportData(){
-  const backup = { version: 2, exportedAt: new Date().toISOString(), hourlyRate: state.hourlyRate, shifts: state.shifts, removedDates: state.removedDates };
+  const backup = { version: 3, exportedAt: new Date().toISOString(), hourlyRate: state.hourlyRate, shifts: state.shifts, removedDates: state.removedDates, crew: state.crew, shiftType: state.shiftType };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -663,6 +714,9 @@ function importData(event){
         backup.removedDates.forEach(d => { if(!state.removedDates.includes(d)) state.removedDates.push(d); });
       }
       if(state.hourlyRate === 0 && backup.hourlyRate > 0) state.hourlyRate = backup.hourlyRate;
+      if(backup.crew === 'A' || backup.crew === 'B') state.crew = backup.crew;
+      if(backup.shiftType === 'night' || backup.shiftType === 'day') state.shiftType = backup.shiftType;
+      updateRulesText();
       state.shifts.sort((a, b) => a.date < b.date ? -1 : 1);
       save(); renderAll(true); closeSettings();
       alert('✅ ' + added + ' new shifts imported.');
@@ -942,5 +996,6 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 
 // ── Boot ──
 load();
+updateRulesText();
 if(state.hourlyRate > 0){ autoPopulateCrewShifts(); save(); }
 renderAll();

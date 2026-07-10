@@ -115,6 +115,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .rate-input-row{display:flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px 14px}
 .rate-symbol{font-family:'Syne',sans-serif;font-size:24px;color:var(--muted)}
 .rate-input{flex:1;background:none;border:none;outline:none;font-family:'Syne',sans-serif;font-size:30px;font-weight:800;color:var(--text);width:100%}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:4px;gap:4px;margin-bottom:6px}
+.seg-btn{padding:10px 4px;text-align:center;border-radius:8px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;transition:all .15s}
+.seg-btn.active{background:var(--accent);color:#fff}
 .rules-grid{display:flex;flex-direction:column;gap:8px}
 .rule-row{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border-radius:10px}
 .rule-icon{font-size:16px;width:24px;text-align:center}

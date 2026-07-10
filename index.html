@@ -78,7 +78,7 @@
         </div>
       </div>
       <div class="form-group">
-        <div class="form-label">Shift Date (Night Starting)</div>
+        <div class="form-label">Shift Date (Shift Starting)</div>
         <input type="date" class="form-input" id="shiftDate">
         <div class="crew-indicator scheduled" id="crewIndicator"><span>✓</span> A Crew scheduled night</div>
       </div>
@@ -142,6 +142,17 @@
           <input type="number" class="rate-input" id="rateInput" placeholder="0.00" step="0.01" min="0" inputmode="decimal">
         </div>
       </div>
+      <div class="form-group">
+        <div class="form-label">My Crew &amp; Shift</div>
+        <div class="seg" id="crewSeg">
+          <div class="seg-btn" data-val="A" onclick="setCrew('A')">A Crew</div>
+          <div class="seg-btn" data-val="B" onclick="setCrew('B')">B Crew</div>
+        </div>
+        <div class="seg" id="shiftSeg">
+          <div class="seg-btn" data-val="night" onclick="setShiftType('night')">🌙 Nights</div>
+          <div class="seg-btn" data-val="day" onclick="setShiftType('day')">☀️ Days</div>
+        </div>
+      </div>
       <div>
         <div class="form-label" style="margin-bottom:8px">Pay Preview (incl. 5% shift diff)</div>
         <div class="preview-table" id="previewTable"></div>
@@ -150,14 +161,14 @@
       <div>
         <div class="form-label" style="margin-bottom:8px">Union Rules</div>
         <div class="rules-grid">
-          <div class="rule-row"><div class="rule-icon">🌙</div><div><div class="rule-title">Shift Hours</div><div class="rule-detail">6 PM → 6 AM (12 hrs gross)</div></div></div>
+          <div class="rule-row"><div class="rule-icon">🌙</div><div><div class="rule-title">Shift Hours</div><div class="rule-detail" id="ruleHours">6 PM → 6 AM (12 hrs gross)</div></div></div>
           <div class="rule-row"><div class="rule-icon">☕</div><div><div class="rule-title">Unpaid Break</div><div class="rule-detail">30 min deducted → 11.5 hrs paid</div></div></div>
           <div class="rule-row"><div class="rule-icon">⚡</div><div><div class="rule-title">Overtime</div><div class="rule-detail">1.5× after 8 hrs/shift</div></div></div>
           <div class="rule-row"><div class="rule-icon">⭐</div><div><div class="rule-title">Unscheduled Day</div><div class="rule-detail">1.75× flat rate for full shift</div></div></div>
           <div class="rule-row"><div class="rule-icon">🎉</div><div><div class="rule-title">Holiday</div><div class="rule-detail">Worked: 1× + 0.5× premium + 13.25h flat · Not worked: 13.25h flat</div></div></div>
-          <div class="rule-row"><div class="rule-icon">💠</div><div><div class="rule-title">Shift Differential</div><div class="rule-detail">Flat 5% of base wage on worked hours</div></div></div>
+          <div class="rule-row"><div class="rule-icon">💠</div><div><div class="rule-title">Shift Differential</div><div class="rule-detail" id="ruleDiff">Flat 5% of base wage on worked hours (nights only)</div></div></div>
           <div class="rule-row"><div class="rule-icon">📅</div><div><div class="rule-title">Pay Period</div><div class="rule-detail">Monday → Sunday</div></div></div>
-          <div class="rule-row"><div class="rule-icon">🔄</div><div><div class="rule-title">A Crew Rotation</div><div class="rule-detail">4 ON / 4 OFF from May 14, 2026</div></div></div>
+          <div class="rule-row"><div class="rule-icon">🔄</div><div><div class="rule-title">Crew Rotation</div><div class="rule-detail" id="ruleRotation">A Crew Nights — 4 ON / 4 OFF</div></div></div>
         </div>
       </div>
       <div class="btn-row">
