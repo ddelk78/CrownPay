@@ -5,6 +5,7 @@ let state = {
   hourlyRate: 0,
   shifts: [],
   removedDates: [],   // dates the user deleted — auto-populate will never resurrect these
+  scheduleStart: null, // earliest date auto-populate may fill (set to today on crew switches)
   period: 'week',
   prevPeriod: 'week',
   editingId: null,
@@ -127,6 +128,7 @@ function save(){
   localStorage.setItem('crownpay_removed', JSON.stringify(state.removedDates));
   localStorage.setItem('crownpay_crew', state.crew);
   localStorage.setItem('crownpay_shift', state.shiftType);
+  localStorage.setItem('crownpay_schedstart', state.scheduleStart || '');
 }
 
 function load(){
@@ -144,6 +146,8 @@ function load(){
   if(c === 'A' || c === 'B') state.crew = c;
   const sh = localStorage.getItem('crownpay_shift');
   if(sh === 'night' || sh === 'day') state.shiftType = sh;
+  const ss = localStorage.getItem('crownpay_schedstart');
+  if(ss) state.scheduleStart = ss;
   // Migrate holiday shifts saved before the "worked / not worked" split
   state.shifts.forEach(s => { if(s.isHoliday && s.holidayWorked === undefined) s.holidayWorked = true; });
 }
@@ -155,9 +159,12 @@ function getShiftByDate(dateStr){
 // Auto-populate the A-crew rotation. Skips any date that already has a shift
 // of ANY kind (was: re-added a duplicate if the day's shift was marked holiday)
 // and any date the user deleted (was: deleted shifts came back on every reload).
-function autoPopulateCrewShifts(){
+function autoPopulateCrewShifts(fromToday){
   const today = startOfDay(new Date());
-  const start = new Date(today.getFullYear(), 0, 1);
+  // Crew/shift switches must never backfill fake history for the new pattern —
+  // persist the cutoff so boot-time repopulation respects it too.
+  if(fromToday) state.scheduleStart = todayStr();
+  const start = state.scheduleStart ? strToDate(state.scheduleStart) : new Date(today.getFullYear(), 0, 1);
   const end = new Date(today.getFullYear(), today.getMonth() + 2, 0);
   const removed = new Set(state.removedDates);
   const haveDate = new Set(state.shifts.map(s => s.date));
@@ -571,14 +578,18 @@ function saveShift(){
   const endStr = document.getElementById('shiftEnd').value;
   const note = document.getElementById('shiftNote').value.trim();
   if(!date || !startStr || !endStr) return;
+  const worked = !state.isHoliday || state.holidayWorked;
+  const paid = worked ? calcPaidHours(startStr, endStr) : 0;
+  if(worked && paid <= 0){
+    alert('⚠️ Those times come out to 0 paid hours (after the 30-minute break). Please check the start and end times.');
+    return;
+  }
   // One shift per date — replacing prevents silent double-counted pay
   const dup = state.shifts.find(s => s.date === date && s.id !== state.editingId);
   if(dup){
     if(!confirm('A shift already exists on ' + date + '. Replace it?')) return;
     state.shifts = state.shifts.filter(s => !(s.date === date && s.id !== state.editingId));
   }
-  const worked = !state.isHoliday || state.holidayWorked;
-  const paid = worked ? calcPaidHours(startStr, endStr) : 0;
   const shift = {
     id: state.editingId || crypto.randomUUID(),
     date, startTime: startStr, endTime: endStr,
@@ -591,7 +602,14 @@ function saveShift(){
   };
   if(state.editingId){
     const idx = state.shifts.findIndex(s => s.id === state.editingId);
-    if(idx >= 0) state.shifts[idx] = shift; else state.shifts.push(shift);
+    if(idx >= 0){
+      // Moving a shift to a new date: protect the old date from auto-refill
+      const oldDate = state.shifts[idx].date;
+      if(oldDate !== date && !state.removedDates.includes(oldDate)) state.removedDates.push(oldDate);
+      state.shifts[idx] = shift;
+    } else {
+      state.shifts.push(shift);
+    }
   } else {
     state.shifts.push(shift);
   }
@@ -658,7 +676,7 @@ function saveSettings(){
   state.crew = pendingCrew;
   state.shiftType = pendingShiftType;
   if(rateOk) state.hourlyRate = r;
-  if(state.hourlyRate > 0 && (firstRate || crewChanged)) autoPopulateCrewShifts();
+  if(state.hourlyRate > 0 && (firstRate || crewChanged)) autoPopulateCrewShifts(crewChanged && !firstRate);
   updateRulesText();
   save(); renderAll(true); closeSettings();
 }
@@ -827,8 +845,8 @@ function renderPaystub(){
   const premiumHrsEquiv = (otH * 0.5) + (unscHrs * 0.75) + (holHrs * 0.5);
   const premiumAmt = premiumHrsEquiv * rate;
 
-  // SHIFT DIFF = flat 5% of base wage on worked hours
-  const shiftAmt = totalWorkedHrs * rate * SHIFT_DIFF;
+  // SHIFT DIFF = flat 5% of base wage on worked hours — NIGHTS ONLY (matches calcShiftPay)
+  const shiftAmt = state.shiftType === 'night' ? totalWorkedHrs * rate * SHIFT_DIFF : 0;
 
   const gross = regAmt + holAmt + premiumAmt + shiftAmt;
 
@@ -920,11 +938,11 @@ function renderPaystub(){
         <div class="ps-numeric">${premiumHrsEquiv.toFixed(2)}</div>
         <div class="ps-numeric">${fmtN(premiumAmt)}</div>
       </div>` : ''}
-      <div class="ps-grid-row ps-earn-row">
+      ${shiftAmt > 0 ? `<div class="ps-grid-row ps-earn-row">
         <div>SHIFT DIFF (5%)</div>
         <div class="ps-numeric">—</div>
         <div class="ps-numeric">${fmtN(shiftAmt)}</div>
-      </div>
+      </div>` : ''}
       <div class="ps-grid-row ps-earn-row total">
         <div>Gross Total</div>
         <div class="ps-numeric">${(totalWorkedHrs + holFixedHrs).toFixed(2)}</div>
@@ -962,10 +980,11 @@ function renderPaystub(){
 // ── Reset ──
 function resetAllData(){
   if(!confirm('Reset everything? This deletes all shifts and your hourly rate. Cannot be undone.')) return;
-  state.shifts = []; state.hourlyRate = 0; state.removedDates = [];
+  state.shifts = []; state.hourlyRate = 0; state.removedDates = []; state.scheduleStart = null;
   localStorage.removeItem('crownpay_shifts');
   localStorage.removeItem('crownpay_rate');
   localStorage.removeItem('crownpay_removed');
+  localStorage.removeItem('crownpay_schedstart');
   renderAll(); closeSettings();
 }
 
